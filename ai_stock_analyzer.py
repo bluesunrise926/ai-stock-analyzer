@@ -50,21 +50,34 @@ with st.sidebar:
         help="請輸入美股股票代碼（英文大寫）"
     ).strip().upper()
 
+    # ── 從 Streamlit Secrets 自動讀取 API Key ──
+    # 若 Secrets 已設定，則自動載入並隱藏輸入框
+    _fmp_secret     = st.secrets.get("FMP_API_KEY", "")
+    _gemini_secret  = st.secrets.get("GEMINI_API_KEY", "")
+
     # FMP API Key
-    fmp_api_key = st.text_input(
-        "🔑 FMP API Key",
-        type="password",
-        placeholder="請輸入 Financial Modeling Prep API Key",
-        help="前往 https://financialmodelingprep.com 免費申請"
-    )
+    if _fmp_secret:
+        fmp_api_key = _fmp_secret
+        st.success("🔑 FMP API Key：已從 Secrets 自動載入 ✅")
+    else:
+        fmp_api_key = st.text_input(
+            "🔑 FMP API Key",
+            type="password",
+            placeholder="請輸入 Financial Modeling Prep API Key",
+            help="前往 https://financialmodelingprep.com 免費申請"
+        )
 
     # Gemini API Key
-    gemini_api_key = st.text_input(
-        "🤖 Gemini API Key",
-        type="password",
-        placeholder="請輸入 Google Gemini API Key",
-        help="前往 https://aistudio.google.com/apikey 免費申請（訂閱 Gemini Advanced 可使用 Pro 模型）"
-    )
+    if _gemini_secret:
+        gemini_api_key = _gemini_secret
+        st.success("🤖 Gemini API Key：已從 Secrets 自動載入 ✅")
+    else:
+        gemini_api_key = st.text_input(
+            "🤖 Gemini API Key",
+            type="password",
+            placeholder="請輸入 Google Gemini API Key",
+            help="前往 https://aistudio.google.com/apikey 免費申請（訂閱 Gemini Advanced 可使用 Pro 模型）"
+        )
 
     # Gemini 模型選擇
     st.markdown("**🧠 AI 分析模型**")
@@ -150,7 +163,7 @@ if not analyze_btn:
 
 **使用步驟：**
 1. 在左側輸入**股票代碼**（如 `AAPL`、`MSFT`、`GOOGL`）
-2. 輸入 **FMP API Key** 和 **Gemini API Key**
+2. 若 API Key 已設定於 Streamlit Secrets，**系統將自動載入**，無需手動輸入
 3. 選擇 **AI 分析模型**（Pro 深度分析 / Flash 快速分析）
 4. 設定**分析期間**（預設近 90 天）
 5. 點擊「🔍 分析」按鈕
