@@ -118,12 +118,16 @@ with st.sidebar:
             finmind_token = _finmind_secret
             st.success("🔑 FinMind Token：已從 Secrets 自動載入 ✅")
         else:
-            finmind_token = st.text_input(
-                "FinMind API Token",
-                type="password",
-                placeholder="請輸入 FinMind API Token（可留空使用免費額度）",
-                help="前往 https://finmindtrade.com 免費註冊取得 Token，每小時 600 次請求"
-            )
+            finmind_token = ""
+        # 無論 Secrets 是否有值，都顯示輸入框讓使用者可手動覆蓋
+        manual_token = st.text_input(
+            "FinMind API Token（選填）",
+            type="password",
+            value="",
+            help="請至 finmindtrade.com 免費註冊取得。若查詢當日數據或熱門股，未帶 Token 會被伺服器拒絕（HTTP 400）。"
+        )
+        if manual_token:
+            finmind_token = manual_token
     else:
         finmind_token = ""
 
@@ -340,10 +344,9 @@ def get_us_stock_data(sym: str, api_key: str) -> pd.DataFrame:
 def get_tw_stock_data(sym: str, token: str,
                        s_date: str, e_date: str) -> pd.DataFrame:
     """
-    從 FinMind API 獲取台股歷史數據
-    API: https://api.finmindtrade.com/api/v4/data
-    Dataset: TaiwanStockPrice
-    欄位：date, open, max(high), min(low), close, Trading_Volume(volume)
+    從 FinMind API v4 獲取台股歷史數據
+    - 不使用 raise_for_status()，改用 response.json() 解析錯誤訊息
+    - token 透過 params 傳遞（非 Authorization header）
     """
     url = "https://api.finmindtrade.com/api/v4/data"
     params = {
@@ -352,57 +355,52 @@ def get_tw_stock_data(sym: str, token: str,
         "start_date": s_date,
         "end_date": e_date,
     }
-    headers = {}
+    # Token 透過 params 傳遞（FinMind v4 標準方式）
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        params["token"] = token
 
     try:
-        resp = requests.get(url, params=params, headers=headers, timeout=20)
-        resp.raise_for_status()
-        result = resp.json()
+        response = requests.get(url, params=params, timeout=20)
+        # 不使用 raise_for_status()，直接解析 JSON 取得真正錯誤原因
+        res_json = response.json()
 
-        if result.get("status") != 200:
-            msg = result.get("msg", "未知錯誤")
-            if "token" in msg.lower() or "auth" in msg.lower():
-                raise ValueError(f"FinMind Token 無效：{msg}")
-            raise ValueError(f"FinMind API 錯誤：{msg}")
+        # FinMind v4 標準成功狀態碼為 200
+        if response.status_code != 200 or res_json.get("status") != 200:
+            server_msg = res_json.get("msg", "未知伺服器錯誤")
+            raise ValueError(
+                f"FinMind 拒絕請求原因：{server_msg} "
+                f"(HTTP {response.status_code})。"
+                f"請確認 Token 是否正確，或嘗試擴大日期範圍避開非交易日。"
+            )
 
-        records = result.get("data", [])
+        records = res_json.get("data", [])
         if not records:
             raise ValueError(
-                f"找不到台股代碼 '{sym}' 的數據。\n"
-                "請確認：\n"
-                "1. 代碼是否正確（例如台積電為 2330）\n"
-                "2. 所選日期範圍內是否有交易數據"
+                f"此時間區間內找不到 '{sym}' 的交易資料，"
+                "請確認股票代碼正確，或調整日期範圍避開週末與國定假日。"
             )
 
         df = pd.DataFrame(records)
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date", ascending=True).reset_index(drop=True)
 
-        # 統一欄位名稱（FinMind 使用 max/min，統一改為 high/low）
+        # 統一欄位名稱（FinMind 使用 max/min 與 Trading_Volume）
         df = df.rename(columns={
             "max": "high",
             "min": "low",
             "Trading_Volume": "volume",
         })
 
-        # 確保數值型別正確
         for col in ["open", "high", "low", "close", "volume"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
         return df[["date", "open", "high", "low", "close", "volume"]]
 
-    except requests.exceptions.ConnectionError:
-        raise ConnectionError("網路連線失敗，請檢查網路連線後重試")
-    except requests.exceptions.Timeout:
-        raise TimeoutError("FinMind API 請求逾時，請稍後重試")
-    except requests.exceptions.HTTPError as e:
-        if resp.status_code == 401:
-            raise ValueError("FinMind Token 無效，請確認 Token 是否正確")
-        else:
-            raise ValueError(f"FinMind API 請求失敗（HTTP {resp.status_code}）：{str(e)}")
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"網路連線或解析失敗：{str(e)}")
 
 
 def filter_by_date_range(df: pd.DataFrame,
